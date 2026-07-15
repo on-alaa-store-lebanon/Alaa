@@ -1,0 +1,64 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Premium store products",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "basePrice": { "type": "number" },
+        "desc": { "type": "string" },
+        "stock": { "type": "number" },
+        "visible": { "type": "boolean" },
+        "imageUrl": { "type": "string" },
+        "imageUrls": { "type": "array" },
+        "options": { "type": "array" },
+        "variants": { "type": "array" },
+        "nameAr": { "type": "string" },
+        "descAr": { "type": "string" },
+        "categoryAr": { "type": "string" },
+        "featured": { "type": "boolean" }
+      },
+      "required": ["id", "name", "category", "basePrice"]
+    },
+    "Wishlist": {
+      "title": "Wishlist",
+      "description": "User product wishlists",
+      "type": "object",
+      "properties": {
+        "items": { "type": "array" }
+      },
+      "required": ["items"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Customer ratings and reviews for products",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "name": { "type": "string" },
+        "rating": { "type": "number" },
+        "text": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "productId", "name", "rating", "text", "date"]
+    }
+  },
+  "firestore": {
+    "products/{productId}": {
+      "schema": "Product",
+      "description": "Collection of available store products"
+    },
+    "wishlists/{username}": {
+      "schema": "Wishlist",
+      "description": "User specific wishlist array"
+    },
+    "reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Product customer reviews"
+    }
+  }
+}
