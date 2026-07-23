@@ -20,6 +20,10 @@ import {
   QrCode,
   Copy,
   Check,
+  ArrowUpDown,
+  Share2,
+  Printer,
+  Download,
 } from "lucide-react";
 
 // Firebase/Firestore Imports
@@ -68,13 +72,13 @@ export default function App() {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
-          return parsed;
+          return parsed.slice(0, 14);
         }
       }
-      return INITIAL_PRODUCTS;
+      return INITIAL_PRODUCTS.slice(0, 14);
     } catch (e) {
       console.error("Error parsing alaa_store_products from localStorage:", e);
-      return INITIAL_PRODUCTS;
+      return INITIAL_PRODUCTS.slice(0, 14);
     }
   });
 
@@ -86,15 +90,8 @@ export default function App() {
       unsubscribe = onSnapshot(q, async (snapshot) => {
         try {
           if (snapshot.empty) {
-            // Database is empty. Let's seed it with INITIAL_PRODUCTS for a great first-time user experience
-            console.log("Firestore products collection is empty. Seeding INITIAL_PRODUCTS...");
-            for (const p of INITIAL_PRODUCTS) {
-              try {
-                await setDoc(doc(db, "products", p.id), p);
-              } catch (e) {
-                console.error("Error seeding product:", p.id, e);
-              }
-            }
+            console.log("Firestore products collection is empty. Falling back to local catalog...");
+            setProducts(INITIAL_PRODUCTS.slice(0, 14));
             return;
           }
 
@@ -118,14 +115,22 @@ export default function App() {
                 descAr: data.descAr || "",
                 categoryAr: data.categoryAr || "",
                 featured: data.featured === true,
+                updatedAt: data.updatedAt || "",
               });
             }
           });
           
-          // Sort products by id to keep a stable visual presentation
-          fetchedProducts.sort((a, b) => (a.id || "").localeCompare(b.id || ""));
+          // Sort products so the newest uploaded/updated items come first
+          fetchedProducts.sort((a, b) => {
+            if (a.updatedAt && b.updatedAt) {
+              return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+            }
+            return (b.id || "").localeCompare(a.id || "");
+          });
           
-          setProducts(fetchedProducts);
+          // Filter to strictly sync the 14 newest entries to keep memory and storage footprint light
+          const latest14Products = fetchedProducts.slice(0, 14);
+          setProducts(latest14Products);
         } catch (innerError) {
           console.error("Error processing Firestore snapshot:", innerError);
         }
@@ -241,7 +246,7 @@ export default function App() {
       unsubscribe = onSnapshot(q, async (snapshot) => {
         try {
           if (snapshot.empty) {
-            console.log("Firestore reviews collection is empty. Seeding INITIAL_REVIEWS...");
+            console.log("Firestore reviews collection is empty. Falling back to default reviews...");
             const INITIAL_REVIEWS: Review[] = [
               {
                 id: "r1",
@@ -308,13 +313,7 @@ export default function App() {
                 date: "2026-07-04"
               }
             ];
-            for (const r of INITIAL_REVIEWS) {
-              try {
-                await setDoc(doc(db, "reviews", r.id), r);
-              } catch (e) {
-                console.error("Error seeding review:", r.id, e);
-              }
-            }
+            setReviews(INITIAL_REVIEWS);
             return;
           }
 
@@ -434,7 +433,8 @@ export default function App() {
 
   // Persistence side-effects
   useEffect(() => {
-    safeSetItem("alaa_store_products", JSON.stringify(products));
+    // Only cache the 14 latest products to strictly remain within LocalStorage quotas
+    safeSetItem("alaa_store_products", JSON.stringify(products.slice(0, 14)));
   }, [products]);
 
   useEffect(() => {
@@ -579,6 +579,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All Categories");
   const [hideOutOfStock, setHideOutOfStock] = useState(false);
+  const [sortBy, setSortBy] = useState<"default" | "price-asc" | "price-desc" | "popularity">("default");
 
   // Active modal/popup states
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -592,6 +593,217 @@ export default function App() {
       setStoreUrl(window.location.href);
     }
   }, []);
+
+  // Web Share API handler
+  const handleShareStore = async () => {
+    const title = getStoreField(lang, storeSettings, "title") || "ON ALAA STORE";
+    const text = getStoreField(lang, storeSettings, "description") || (lang === "ar" ? "تفقد متجرنا المذهل وجديد منتجاتنا!" : "Check out our amazing products and new arrivals!");
+    const targetUrl = storeUrl || (typeof window !== "undefined" ? window.location.href : "https://on-alaa-store.web.app");
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title,
+          text,
+          url: targetUrl,
+        });
+        showToast(lang === "ar" ? "تمت المشاركة بنجاح!" : "Shared successfully!", "success");
+      } catch (err: any) {
+        if (err.name !== "AbortError") {
+          showToast(lang === "ar" ? "فشلت المشاركة" : `Share failed: ${err.message}`, "error");
+        }
+      }
+    } else {
+      // Fallback copy
+      try {
+        await navigator.clipboard.writeText(targetUrl);
+        setIsCopied(true);
+        showToast(
+          lang === "ar" ? "المشاركة غير مدعومة. تم نسخ رابط المتجر!" : "Direct sharing not supported. Link copied!",
+          "success"
+        );
+        setTimeout(() => setIsCopied(false), 2000);
+      } catch (e) {
+        showToast(lang === "ar" ? "فشل نسخ الرابط" : "Failed to copy link", "error");
+      }
+    }
+  };
+
+  // Download QR Code Image as PNG file
+  const handleDownloadQr = async () => {
+    const targetUrl = storeUrl || (typeof window !== "undefined" ? window.location.href : "https://on-alaa-store.web.app");
+    const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(targetUrl)}`;
+    
+    try {
+      const response = await fetch(qrApiUrl);
+      if (!response.ok) throw new Error("Network response was not ok");
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `ON-ALAA-Store-QR.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+      showToast(
+        lang === "ar" ? "تم تحميل رمز الـ QR بنجاح!" : "QR code downloaded successfully!",
+        "success"
+      );
+    } catch (err) {
+      console.error("Failed to fetch blob for QR code download:", err);
+      // Fallback direct link
+      const link = document.createElement("a");
+      link.href = qrApiUrl;
+      link.download = `ON-ALAA-Store-QR.png`;
+      link.target = "_blank";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast(
+        lang === "ar" ? "جاري فتح صورة الرمز للتحميل..." : "Opening QR image for download...",
+        "success"
+      );
+    }
+  };
+
+  // Print QR Code display area specifically via dedicated printable view
+  const handlePrintQr = () => {
+    const targetUrl = storeUrl || (typeof window !== "undefined" ? window.location.href : "https://on-alaa-store.web.app");
+    const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(targetUrl)}`;
+    const storeTitle = getStoreField(lang, storeSettings, "title") || "ON ALAA STORE";
+    const storeDesc = getStoreField(lang, storeSettings, "description") || (lang === "ar" ? "امسح رمز الـ QR لزيارة المتجر" : "Scan QR code to visit storefront");
+
+    // Create an invisible iframe for printing specifically the QR code display area
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    iframe.style.opacity = "0";
+    iframe.style.pointerEvents = "none";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document;
+    if (!doc) return;
+
+    doc.open();
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Print QR Code - ${storeTitle}</title>
+          <style>
+            @page {
+              size: auto;
+              margin: 10mm;
+            }
+            body {
+              font-family: system-ui, -apple-system, sans-serif;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              min-height: 90vh;
+              margin: 0;
+              padding: 20px;
+              background: #ffffff;
+              color: #0f172a;
+              text-align: center;
+            }
+            .qr-card {
+              border: 2px solid #0f172a;
+              border-radius: 24px;
+              padding: 32px 24px;
+              max-width: 340px;
+              width: 100%;
+              box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+              box-sizing: border-box;
+            }
+            .store-name {
+              font-size: 20px;
+              font-weight: 900;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              margin: 0 0 6px 0;
+            }
+            .store-desc {
+              font-size: 11px;
+              color: #64748b;
+              font-weight: 700;
+              margin: 0 0 24px 0;
+              line-height: 1.4;
+            }
+            .qr-wrapper {
+              background: #f8fafc;
+              border: 1px solid #e2e8f0;
+              border-radius: 16px;
+              padding: 16px;
+              display: inline-block;
+              margin-bottom: 20px;
+            }
+            .qr-img {
+              width: 220px;
+              height: 220px;
+              object-fit: contain;
+              display: block;
+              margin: 0 auto;
+              border-radius: 8px;
+            }
+            .url-box {
+              background: #f1f5f9;
+              border: 1px solid #cbd5e1;
+              border-radius: 10px;
+              padding: 10px 14px;
+              font-family: monospace;
+              font-size: 10px;
+              color: #334155;
+              word-break: break-all;
+            }
+            @media print {
+              body {
+                min-height: auto;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="qr-card">
+            <div class="store-name">${storeTitle}</div>
+            <div class="store-desc">${storeDesc}</div>
+            <div class="qr-wrapper">
+              <img src="${qrApiUrl}" alt="Store QR Code" id="printable-qr-img" />
+            </div>
+            <div class="url-box">${targetUrl}</div>
+          </div>
+          <script>
+            const img = document.getElementById('printable-qr-img');
+            const doPrint = () => {
+              window.focus();
+              window.print();
+            };
+            if (img && img.complete) {
+              setTimeout(doPrint, 250);
+            } else if (img) {
+              img.onload = () => setTimeout(doPrint, 250);
+              img.onerror = () => setTimeout(doPrint, 250);
+            } else {
+              setTimeout(doPrint, 250);
+            }
+          </script>
+        </body>
+      </html>
+    `);
+    doc.close();
+
+    setTimeout(() => {
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+      }
+    }, 60000);
+  };
 
   // Toast notification
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -753,7 +965,7 @@ export default function App() {
 
   // Filter products for storefront
   const getFilteredProducts = () => {
-    return products.filter((p) => {
+    const filtered = products.filter((p) => {
       // Visibility guard
       if (p.visible === false) return false;
 
@@ -782,6 +994,36 @@ export default function App() {
 
       return true;
     });
+
+    // Apply sorting
+    if (sortBy === "price-asc") {
+      filtered.sort((a, b) => a.basePrice - b.basePrice);
+    } else if (sortBy === "price-desc") {
+      filtered.sort((a, b) => b.basePrice - a.basePrice);
+    } else if (sortBy === "popularity") {
+      filtered.sort((a, b) => {
+        // Popularity score calculation: orders count + reviews count + featured status bonus
+        const countOrdersA = orders.reduce((sum, order) => {
+          return sum + (order.items?.filter((item) => item.productId === a.id).reduce((s, item) => s + (item.qty || 1), 0) || 0);
+        }, 0);
+        const countOrdersB = orders.reduce((sum, order) => {
+          return sum + (order.items?.filter((item) => item.productId === b.id).reduce((s, item) => s + (item.qty || 1), 0) || 0);
+        }, 0);
+
+        const countReviewsA = reviews.filter((r) => r.productId === a.id).length;
+        const countReviewsB = reviews.filter((r) => r.productId === b.id).length;
+
+        const bonusA = a.featured ? 5 : 0;
+        const bonusB = b.featured ? 5 : 0;
+
+        const scoreA = countOrdersA + countReviewsA + bonusA;
+        const scoreB = countOrdersB + countReviewsB + bonusB;
+
+        return scoreB - scoreA; // descending order of popularity
+      });
+    }
+
+    return filtered;
   };
 
   const filteredProducts = getFilteredProducts();
@@ -1186,8 +1428,8 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Hide out of stock checkbox */}
-                  <div className="flex items-center justify-between px-1">
+                  {/* Hide out of stock checkbox & sorting dropdown */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
                     <label 
                       htmlFor="hide-oos-checkbox"
                       className="flex items-center gap-2 text-[10px] font-black text-gray-500 uppercase tracking-widest cursor-pointer select-none"
@@ -1199,8 +1441,26 @@ export default function App() {
                         onChange={(e) => setHideOutOfStock(e.target.checked)}
                         className="rounded border-gray-300 text-[#0F172A] focus:ring-[#0F172A] w-4 h-4 cursor-pointer"
                       />
-                      <span>{lang === "ar" ? "إخفاء المنتجات المنتهية من المخزن" : "Hide out-of-stock items"}</span>
+                      <span>{lang === "ar" ? "إخفاء المنتهية" : "Hide out-of-stock"}</span>
                     </label>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-1">
+                        <ArrowUpDown size={11} strokeWidth={2.5} />
+                        {lang === "ar" ? "ترتيب:" : "Sort:"}
+                      </span>
+                      <select
+                        id="store-sort-select"
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value as any)}
+                        className="bg-white border-2 border-gray-200 text-[10px] font-black text-[#0F172A] rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-[#0F172A] cursor-pointer transition uppercase tracking-wider"
+                      >
+                        <option value="default">{lang === "ar" ? "الافتراضي" : "Default"}</option>
+                        <option value="price-asc">{lang === "ar" ? "السعر: الأقل للأعلى" : "Price: Low to High"}</option>
+                        <option value="price-desc">{lang === "ar" ? "السعر: الأعلى للأقل" : "Price: High to Low"}</option>
+                        <option value="popularity">{lang === "ar" ? "الأكثر شعبية" : "Popularity"}</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
 
@@ -1604,13 +1864,38 @@ export default function App() {
                 </p>
               </div>
 
-              {/* Dynamic QR Code Display */}
-              <div className="flex flex-col items-center justify-center my-4.5 p-4 bg-slate-50 rounded-2xl border border-slate-100 shadow-inner">
+              {/* Dynamic QR Code Display Area */}
+              <div id="qr-code-display-area" className="flex flex-col items-center justify-center my-3.5 p-3.5 bg-slate-50 rounded-2xl border border-slate-100 shadow-inner">
                 <img
                   src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(storeUrl || "https://on-alaa-store.web.app")}`}
                   alt="Store QR Code"
                   className="w-36 h-36 object-contain rounded-lg border-2 border-white shadow bg-white"
                 />
+
+                {/* QR Quick Actions: Download & Print */}
+                <div className="flex items-center gap-2 mt-3 w-full justify-center">
+                  <button
+                    type="button"
+                    onClick={handleDownloadQr}
+                    className="flex-1 bg-white hover:bg-slate-100 text-slate-800 border border-slate-200 text-[9px] font-black uppercase tracking-wider py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 transition duration-150 cursor-pointer shadow-2xs hover:border-slate-300 active:scale-95"
+                    id="download-qr-btn"
+                    title="Download QR Code PNG"
+                  >
+                    <Download size={12} className="text-slate-600 shrink-0" />
+                    <span>{lang === "ar" ? "تنزيل الرمز" : "Download QR"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handlePrintQr}
+                    className="flex-1 bg-white hover:bg-slate-100 text-slate-800 border border-slate-200 text-[9px] font-black uppercase tracking-wider py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 transition duration-150 cursor-pointer shadow-2xs hover:border-slate-300 active:scale-95"
+                    id="print-qr-btn"
+                    title="Print QR Code Area"
+                  >
+                    <Printer size={12} className="text-slate-600 shrink-0" />
+                    <span>{lang === "ar" ? "طباعة الرمز" : "Print QR"}</span>
+                  </button>
+                </div>
               </div>
 
               {/* Copy & Share Action Panel */}
@@ -1662,6 +1947,17 @@ export default function App() {
                     {isCopied ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
                   </button>
                 </div>
+
+                {/* Share Store button with Web Share API / Copy Fallback */}
+                <button
+                  type="button"
+                  onClick={handleShareStore}
+                  className="w-full bg-[#0F172A] hover:bg-slate-800 active:scale-98 text-white text-[10px] font-black uppercase tracking-widest py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition duration-150 cursor-pointer shadow-[3px_3px_0px_#000] border border-slate-900 mt-2.5"
+                  id="native-share-store-btn"
+                >
+                  <Share2 size={12} strokeWidth={2.5} />
+                  <span>{lang === "ar" ? "مشاركة المتجر" : "Share Store"}</span>
+                </button>
               </div>
 
               {/* Arabic instruction helper */}

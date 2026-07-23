@@ -5,7 +5,7 @@ import { Language, getProductField, getTranslation } from "../lib/translations";
 import { HighlightText } from "./HighlightText";
 import { safeGetItem, safeSetItem } from "../lib/storage";
 import { doc, setDoc } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { db, handleFirestoreError, OperationType } from "../lib/firebase";
 
 const DEFAULT_REVIEWS = {
   "p1": {
@@ -179,7 +179,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({ product, onClose, on
       const docRef = doc(db, "reviews", newReviewObj.id);
       await setDoc(docRef, newReviewObj);
     } catch (err) {
-      console.error("Error saving review to Firestore:", err);
+      handleFirestoreError(err, OperationType.CREATE, `reviews/${newReviewObj.id}`);
     }
 
     setNewComment("");

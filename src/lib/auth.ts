@@ -152,6 +152,14 @@ export const INITIAL_USERS: User[] = [
     role: "super_admin",
     passwordHash: hashPassword("A123321A"), // Secure password key: A123321A
   },
+  {
+    id: "user-galaxycell",
+    username: "galaxycell",
+    fullName: "Galaxy Cell (Super Admin)",
+    email: "galaxycell.lb@gmail.com",
+    role: "super_admin",
+    passwordHash: hashPassword("A123321A"), // Secure password key: A123321A
+  },
 ];
 
 import { safeGetItem, safeSetItem } from "./storage";
@@ -174,7 +182,13 @@ export function loadUsers(): User[] {
 
   // Enforce Super Admin's password to exactly match the required key: A123321A
   usersList = usersList.map((u) => {
-    if (u.id === "user-admin" || u.username === "admin") {
+    if (
+      u.id === "user-admin" || 
+      u.username === "admin" ||
+      u.id === "user-galaxycell" ||
+      u.username === "galaxycell" ||
+      u.email === "galaxycell.lb@gmail.com"
+    ) {
       return {
         ...u,
         passwordHash: hashPassword("A123321A")

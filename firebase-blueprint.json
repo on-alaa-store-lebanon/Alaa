@@ -45,6 +45,23 @@
         "date": { "type": "string" }
       },
       "required": ["id", "productId", "name", "rating", "text", "date"]
+    },
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "Store branding and settings configuration",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "phone": { "type": "string" },
+        "description": { "type": "string" },
+        "instagram": { "type": "string" },
+        "locationUrl": { "type": "string" },
+        "profilePicUrl": { "type": "string" },
+        "headerVideoUrl": { "type": "string" },
+        "titleAr": { "type": "string" },
+        "descriptionAr": { "type": "string" }
+      },
+      "required": ["title", "phone", "description"]
     }
   },
   "firestore": {
@@ -59,6 +76,10 @@
     "reviews/{reviewId}": {
       "schema": "Review",
       "description": "Product customer reviews"
+    },
+    "settings/{settingId}": {
+      "schema": "StoreSettings",
+      "description": "Store brand configuration and parameters"
     }
   }
 }

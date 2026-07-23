@@ -6,7 +6,7 @@ import { compressImage } from "../lib/storage";
 
 // Firebase/Firestore Imports
 import { doc, setDoc } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { db, handleFirestoreError, OperationType } from "../lib/firebase";
 
 interface ProductFormProps {
   products: Product[];
@@ -194,10 +194,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
         showToast(`"${sanitizedName}" successfully saved to cloud database!`, "success");
       })
       .catch((error) => {
-        console.error("Error writing document to Firestore: ", error);
-        // Fallback: update local products array directly
-        setProducts((prev) => [...prev, newProduct]);
-        showToast(`Offline Mode: "${sanitizedName}" saved locally!`, "success");
+        handleFirestoreError(error, OperationType.CREATE, `products/${newProduct.id}`);
       });
 
     // Reset Form Fields

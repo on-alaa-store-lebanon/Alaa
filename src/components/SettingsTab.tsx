@@ -6,7 +6,7 @@ import { sanitizeInput } from "../lib/security";
 
 // Firebase/Firestore Imports
 import { doc, updateDoc, setDoc } from "firebase/firestore";
-import { db, isQuotaError } from "../lib/firebase";
+import { db, isQuotaError, handleFirestoreError, OperationType } from "../lib/firebase";
 
 interface SettingsTabProps {
   settings: StoreSettings;
@@ -117,7 +117,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             await setDoc(docRef, cleanedProd);
             importedCount++;
           } catch (err) {
-            console.error("Error importing product document:", err);
+            handleFirestoreError(err, OperationType.CREATE, `products/${prod.id}`);
           }
         }
 
@@ -304,7 +304,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           repairedCount++;
         }
       } catch (err) {
-        console.error("Auto repair error for document:", prod.id, err);
+        handleFirestoreError(err, OperationType.UPDATE, `products/${prod.id}`);
       }
     }
 

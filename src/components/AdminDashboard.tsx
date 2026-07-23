@@ -11,7 +11,8 @@ import {
   Loader2, 
   LayoutGrid,
   FileImage,
-  RefreshCw
+  RefreshCw,
+  Trash2
 } from "lucide-react";
 import { Product } from "../types";
 import { sanitizeInput } from "../lib/security";
@@ -242,15 +243,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ showToast, curre
     }
   };
 
-  // Delete product entry from Firestore database
-  const handleDeleteProduct = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this product from active listing database?")) {
-      return;
-    }
+  // Delete product entry from Firestore database with custom confirmation modal
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+
+  const handleDeleteProduct = (id: string) => {
+    const prod = products.find((p) => p.id === id);
+    setDeleteTarget({ id, name: prod?.name || "Selected Product" });
+  };
+
+  const confirmDeleteProduct = async () => {
+    if (!deleteTarget) return;
+    const { id, name: prodName } = deleteTarget;
     try {
       await deleteDoc(doc(db, "products", id));
       setProducts((prev) => prev.filter((p) => p.id !== id));
-      showToast("Product deleted successfully from database.", "success");
+      showToast(`Product "${prodName}" deleted successfully from database.`, "success");
+      setDeleteTarget(null);
     } catch (error: any) {
       showToast(`Failed to delete product: ${error.message}`, "error");
     }
@@ -580,6 +588,43 @@ service firebase.storage {
           />
         )}
       </div>
+
+      {/* Delete Product Confirmation Modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white border-3 border-[#0F172A] rounded-3xl p-6 max-w-sm w-full shadow-[8px_8px_0px_#000] space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+              <Trash2 size={24} />
+            </div>
+            
+            <div className="text-center space-y-1.5">
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                Confirm Product Deletion
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed text-center">
+                Are you sure you want to delete <strong className="text-slate-800">"{deleteTarget.name}"</strong> from the catalog? This action cannot be undone.
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="flex-1 py-2.5 px-4 bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-800 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteProduct}
+                className="flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-700 active:scale-98 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-[3px_3px_0px_#000] border border-slate-900 cursor-pointer"
+              >
+                Yes, Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

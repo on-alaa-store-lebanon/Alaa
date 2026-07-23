@@ -42,7 +42,9 @@ export const PasswordModal: React.FC<PasswordModalProps> = ({ onClose, onSuccess
 
     const users = loadUsers();
     const foundUser = users.find(
-      (u) => u.username.toLowerCase() === cleanUsername.toLowerCase()
+      (u) => 
+        u.username.toLowerCase() === cleanUsername.toLowerCase() ||
+        u.email.toLowerCase() === cleanUsername.toLowerCase()
     );
 
     if (!foundUser) {

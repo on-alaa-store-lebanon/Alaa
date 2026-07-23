@@ -21,8 +21,13 @@ import {
   ChevronRight,
   AlertCircle,
   Copy,
-  Check
+  Check,
+  Download,
+  FileSpreadsheet,
+  Trash2
 } from "lucide-react";
+import { doc, deleteDoc } from "firebase/firestore";
+import { db } from "../lib/firebase";
 import { Order } from "../types";
 import { WAIcon } from "./WAIcon";
 
@@ -98,7 +103,17 @@ const LOCAL_TRANSLATIONS = {
     thank_you: "Thank you for shopping at ON ALAA STORE!",
     support_line: "For any support queries, contact us on +961 71 135 241 or email support@alaastore.com",
     copied: "Copied!",
-    copy_field: "Copy"
+    copy_field: "Copy",
+    download_csv: "Download CSV",
+    export_orders_csv: "Export Orders CSV",
+    delete_order: "Delete Order",
+    clear_all_orders: "Clear History",
+    confirm_delete_order_title: "Confirm Order Deletion",
+    confirm_delete_order_msg: "Are you sure you want to permanently delete order",
+    confirm_clear_orders_title: "Clear All Orders",
+    confirm_clear_orders_msg: "Are you sure you want to permanently delete ALL orders from record? This action cannot be undone.",
+    confirm_delete: "Delete",
+    cancel: "Cancel"
   },
   ar: {
     orders_db: "قاعدة بيانات الطلبات النشطة",
@@ -153,7 +168,17 @@ const LOCAL_TRANSLATIONS = {
     thank_you: "شكرًا لتسوقكم في متجر علاء!",
     support_line: "لأية استفسارات أو دعم، اتصل بنا على +961 71 135 241 أو البريد الإلكتروني support@alaastore.com",
     copied: "تم النسخ!",
-    copy_field: "نسخ"
+    copy_field: "نسخ",
+    download_csv: "تنزيل CSV",
+    export_orders_csv: "تصدير الطلبات CSV",
+    delete_order: "حذف الطلب",
+    clear_all_orders: "مسح السجل",
+    confirm_delete_order_title: "تأكيد حذف الطلب",
+    confirm_delete_order_msg: "هل أنت متأكد من رغبتك في حذف طلب",
+    confirm_clear_orders_title: "مسح جميع الطلبات",
+    confirm_clear_orders_msg: "هل أنت متأكد من رغبتك في حذف جميع الطلبات بشكل دائم؟ لا يمكن التراجع عن هذا الإجراء.",
+    confirm_delete: "حذف",
+    cancel: "إلغاء"
   }
 };
 
@@ -201,6 +226,38 @@ export const OrdersTab: React.FC<OrdersTabProps> = ({ orders, setOrders, lang })
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedOrderDetail, setSelectedOrderDetail] = useState<Order | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // Delete Confirmation States
+  const [deleteOrderTarget, setDeleteOrderTarget] = useState<{ id: string; customer: string } | null>(null);
+  const [confirmClearOrders, setConfirmClearOrders] = useState(false);
+
+  const handleConfirmDeleteOrder = async () => {
+    if (!deleteOrderTarget) return;
+    const targetId = deleteOrderTarget.id;
+    try {
+      await deleteDoc(doc(db, "orders", targetId));
+    } catch (e) {
+      console.warn("Firestore delete order failed or running offline:", e);
+    }
+    setOrders((prev) => prev.filter((o) => o.id !== targetId));
+    if (selectedOrderDetail && selectedOrderDetail.id === targetId) {
+      setSelectedOrderDetail(null);
+    }
+    setDeleteOrderTarget(null);
+  };
+
+  const handleConfirmClearOrders = async () => {
+    for (const o of orders) {
+      try {
+        await deleteDoc(doc(db, "orders", o.id));
+      } catch (e) {
+        // continue
+      }
+    }
+    setOrders([]);
+    setSelectedOrderDetail(null);
+    setConfirmClearOrders(false);
+  };
 
   const l = lang || "en";
   const t = LOCAL_TRANSLATIONS[l];
@@ -281,17 +338,102 @@ export const OrdersTab: React.FC<OrdersTabProps> = ({ orders, setOrders, lang })
     return STEPPER_STATUSES.indexOf(status);
   };
 
+  // Export Order History to CSV file for store owner bookkeeping
+  const handleDownloadCSV = () => {
+    const listToExport = filteredOrders.length > 0 ? filteredOrders : orders;
+    if (!listToExport || listToExport.length === 0) {
+      alert(l === "ar" ? "لا توجد طلبات لتصديرها" : "No orders found to export");
+      return;
+    }
+
+    const headers = [
+      "Order ID",
+      "Customer Name",
+      "Phone Number",
+      "Delivery Address",
+      "Itemized Products",
+      "Billing Method",
+      "Payment Status",
+      "Fulfillment Status",
+      "Total Amount ($)",
+      "Order Date"
+    ];
+
+    const rows = listToExport.map((o) => {
+      const itemsSummary = (o.items || [])
+        .map((it) => {
+          const varLabel = it.variantLabel ? ` (${it.variantLabel})` : "";
+          return `${it.name}${varLabel} x${it.qty} [$${(it.price * it.qty).toFixed(2)}]`;
+        })
+        .join(" | ");
+
+      return [
+        `"${(o.id || "").replace(/"/g, '""')}"`,
+        `"${(o.customer || "").replace(/"/g, '""')}"`,
+        `"${(o.phone || "").replace(/"/g, '""')}"`,
+        `"${(o.address || "").replace(/"/g, '""')}"`,
+        `"${itemsSummary.replace(/"/g, '""')}"`,
+        `"${(o.paymentMethod || "COD").replace(/"/g, '""')}"`,
+        `"${(o.paymentStatus || "Unpaid").replace(/"/g, '""')}"`,
+        `"${(o.status || "Pending").replace(/"/g, '""')}"`,
+        (o.total || 0).toFixed(2),
+        `"${(o.date || "").replace(/"/g, '""')}"`
+      ];
+    });
+
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `ON_ALAA_STORE_Orders_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-4" dir={l === "ar" ? "rtl" : "ltr"}>
-      {/* Tab Header and Status Counter Badge */}
-      <div className="flex items-center justify-between border-b border-slate-100 pb-3 print:hidden">
+      {/* Tab Header and Actions */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 print:hidden">
         <span className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
           <ClipboardList size={14} className="text-yellow-500" />
           <span>{t.orders_db}</span>
         </span>
-        <span className="text-[10px] text-slate-500 font-extrabold bg-slate-50 border border-slate-200 rounded-full px-3 py-1 uppercase tracking-wider">
-          {t.total_logged}: {orders.length}
-        </span>
+
+        <div className="flex items-center gap-2">
+          {/* Download CSV Button for Bookkeeping */}
+          <button
+            id="download-orders-csv-btn"
+            type="button"
+            onClick={handleDownloadCSV}
+            disabled={orders.length === 0}
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[9px] font-black uppercase tracking-wider py-1.5 px-3 rounded-xl flex items-center gap-1.5 transition duration-150 cursor-pointer shadow-2xs active:scale-95"
+            title={l === "ar" ? "تصدير سجل الطلبات إلى ملف CSV للمحاسبة" : "Export order history to CSV for bookkeeping"}
+          >
+            <Download size={12} strokeWidth={2.5} className="shrink-0" />
+            <span>{t.download_csv}</span>
+          </button>
+
+          {/* Clear Orders Button */}
+          {orders.length > 0 && (
+            <button
+              id="clear-orders-btn"
+              type="button"
+              onClick={() => setConfirmClearOrders(true)}
+              className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-[9px] font-black uppercase tracking-wider py-1.5 px-3 rounded-xl flex items-center gap-1.5 transition duration-150 cursor-pointer shadow-2xs active:scale-95"
+              title={t.clear_all_orders}
+            >
+              <Trash2 size={12} strokeWidth={2.5} className="shrink-0" />
+              <span>{t.clear_all_orders}</span>
+            </button>
+          )}
+
+          <span className="text-[10px] text-slate-500 font-extrabold bg-slate-50 border border-slate-200 rounded-full px-3 py-1 uppercase tracking-wider">
+            {t.total_logged}: {orders.length}
+          </span>
+        </div>
       </div>
 
       {/* Control Panel: Filters and Search */}
@@ -437,14 +579,26 @@ export const OrdersTab: React.FC<OrdersTabProps> = ({ orders, setOrders, lang })
 
                         {/* Detailed View Action Column */}
                         <td className="py-3.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedOrderDetail(o)}
-                            className="bg-slate-900 hover:bg-slate-800 text-white text-[9px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg shadow-sm transition active:scale-95 cursor-pointer flex items-center gap-1 mx-auto"
-                          >
-                            <span>{t.details}</span>
-                            <ChevronRight size={10} strokeWidth={2.5} className={l === "ar" ? "rotate-180" : ""} />
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedOrderDetail(o)}
+                              className="bg-slate-900 hover:bg-slate-800 text-white text-[9px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg shadow-sm transition active:scale-95 cursor-pointer flex items-center gap-1"
+                            >
+                              <span>{t.details}</span>
+                              <ChevronRight size={10} strokeWidth={2.5} className={l === "ar" ? "rotate-180" : ""} />
+                            </button>
+
+                            <button
+                              id={`delete-order-btn-${o.id}`}
+                              type="button"
+                              onClick={() => setDeleteOrderTarget({ id: o.id, customer: o.customer })}
+                              className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg transition active:scale-95 cursor-pointer shrink-0"
+                              title={t.delete_order}
+                            >
+                              <Trash2 size={12} strokeWidth={2.5} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
 
@@ -972,6 +1126,16 @@ export const OrdersTab: React.FC<OrdersTabProps> = ({ orders, setOrders, lang })
                     <Printer size={12} />
                     <span>{t.print_invoice}</span>
                   </button>
+
+                  {/* Delete Order Button */}
+                  <button
+                    type="button"
+                    onClick={() => setDeleteOrderTarget({ id: selectedOrderDetail.id, customer: selectedOrderDetail.customer })}
+                    className="bg-red-50 hover:bg-red-100 active:scale-95 text-red-700 text-[9px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-red-200 transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Trash2 size={12} />
+                    <span>{t.delete_order}</span>
+                  </button>
                 </div>
 
                 {/* Next Step Shortcut Button */}
@@ -1017,6 +1181,84 @@ export const OrdersTab: React.FC<OrdersTabProps> = ({ orders, setOrders, lang })
           </div>
         )}
       </AnimatePresence>
+
+      {/* Custom Confirm Delete Single Order Modal */}
+      {deleteOrderTarget && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white border-3 border-[#0F172A] rounded-3xl p-6 max-w-sm w-full shadow-[8px_8px_0px_#000] space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+              <Trash2 size={24} />
+            </div>
+            
+            <div className="text-center space-y-1.5">
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                {t.confirm_delete_order_title}
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed text-center">
+                {l === "ar"
+                  ? `هل أنت متأكد من رغبتك في حذف طلب "${deleteOrderTarget.customer}" نهائياً؟ لا يمكن التراجع عن هذا الإجراء.`
+                  : `Are you sure you want to permanently delete order for "${deleteOrderTarget.customer}"? This action cannot be undone.`}
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteOrderTarget(null)}
+                className="flex-1 py-2.5 px-4 bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-800 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer"
+              >
+                {t.cancel}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteOrder}
+                className="flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-700 active:scale-98 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-[3px_3px_0px_#000] border border-slate-900 cursor-pointer"
+              >
+                {t.confirm_delete}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Confirm Clear All Orders Modal */}
+      {confirmClearOrders && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white border-3 border-[#0F172A] rounded-3xl p-6 max-w-sm w-full shadow-[8px_8px_0px_#000] space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+              <Trash2 size={24} />
+            </div>
+            
+            <div className="text-center space-y-1.5">
+              <h3 className="text-sm font-black text-red-600 uppercase tracking-wider">
+                {t.confirm_clear_orders_title}
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed text-center">
+                {l === "ar"
+                  ? `هل أنت متأكد من رغبتك في حذف جميع الطلبات (${orders.length}) بشكل دائم من سجلات المتجر؟`
+                  : `Are you sure you want to permanently delete ALL ${orders.length} orders from record? This action cannot be undone.`}
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmClearOrders(false)}
+                className="flex-1 py-2.5 px-4 bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-800 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer"
+              >
+                {t.cancel}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClearOrders}
+                className="flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-700 active:scale-98 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-[3px_3px_0px_#000] border border-slate-900 cursor-pointer"
+              >
+                {t.confirm_delete}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

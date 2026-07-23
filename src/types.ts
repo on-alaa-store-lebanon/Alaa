@@ -26,6 +26,7 @@ export interface Product {
   descAr?: string;
   categoryAr?: string;
   featured?: boolean;
+  updatedAt?: string;
 }
 
 export interface CartItem {
